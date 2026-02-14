@@ -13,7 +13,7 @@ api_key = os.getenv("API_KEY")
 # main.py 수정
 
 def main():
-    client = genai.Client(api_key)
+    client = genai.Client(api_key=api_key)
     driver = setup_driver()
 
     try:

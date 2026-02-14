@@ -104,9 +104,10 @@ def process_game_scraping(driver, config, client, save_fn, exists_fn):
                     logging.info(f" ▷ '{board['name']}' 필수 문구 미포함으로 스킵합니다.")
                     continue
                 
+                name = board.get('name')
                 prompt_func = board.get('specific_prompt')
                 if prompt_func:
-                    final_prompt = prompt_func(title, full_text)
+                    final_prompt = prompt_func(name, title, full_text)
                 else:
                     # 기본 프롬프트가 없을 경우에 대한 예외 처리 로직 필요
                     logging.error("사용 가능한 프롬프트 템플릿이 없습니다.")
@@ -116,7 +117,7 @@ def process_game_scraping(driver, config, client, save_fn, exists_fn):
                 try:
                     # 2. AI 분석 진행 (Gemini 2.0 모델 사용 권장)
                     response = client.models.generate_content(
-                        model='gemini-2.5-flash', 
+                        model='gemini-2.5-flash-lite', 
                         contents=final_prompt
                     )
                     response_text = response.text

@@ -4,3 +4,4 @@ game_schedule.db
 __pycache__/
 venv/
 scrapers/
+Legacy/
