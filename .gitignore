@@ -1,0 +1,6 @@
+# .gitignore 파일
+.env
+game_schedule.db
+__pycache__/
+venv/
+scrapers/
