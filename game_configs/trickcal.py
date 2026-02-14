@@ -72,6 +72,7 @@ CONFIG = {
     "boards": [
         {
             "name": "업데이트", 
+            "type": "text",
             "url": "https://game.naver.com/lounge/Trickcal/board/11?order=new",
             "specific_keywords": ["업데이트"],
             "must_include": ["메인 스토리가 추가됩니다"],
@@ -79,6 +80,7 @@ CONFIG = {
         },
         {
             "name": "이벤트", 
+            "type": "text",
             "url": "https://game.naver.com/lounge/Trickcal/board/13?order=new",
             "specific_keywords": ["신규 픽업", "테마극장"],
             "specific_prompt": prompt_template

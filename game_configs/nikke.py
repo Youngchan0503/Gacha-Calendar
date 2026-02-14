@@ -48,6 +48,7 @@ CONFIG = {
     "boards": [
         {
             "name": "업데이트", 
+            "type": "text",
             "url": "https://game.naver.com/lounge/nikke/board/48",
             "specific_keywords": ["점검&업데이트"],
             "specific_prompt": prompt_template
