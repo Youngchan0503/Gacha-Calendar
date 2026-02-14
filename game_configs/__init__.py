@@ -7,7 +7,7 @@ from .nikke import CONFIG as NIKKE
 GAMES = [
     # BLUE_ARCHIVE,
     # WUTHERING_WAVES,
-    # TRICKCALT,
-    NIKKE,
+    TRICKCALT,
+    # NIKKE,
     # 추가된 게임 변수명을 여기에 등록
 ]

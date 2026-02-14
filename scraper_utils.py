@@ -3,6 +3,9 @@ import random
 import json
 import logging
 import re
+import requests
+from google import genai
+from google.genai import types
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
@@ -39,44 +42,43 @@ def process_game_scraping(driver, config, client, save_fn, exists_fn):
     """게시판을 순회하며 글을 수집하고 AI 분석 후 DB에 저장"""
     wait = WebDriverWait(driver, 15)
     boards = config.get('boards', [{"name": "기본", "url": config.get('base_url')}])
-    
+
+    # 설정에서 셀렉터 가져오기
+    selectors = config.get('selectors', {})
+    list_container_selector = selectors.get('list_container', "tbody")
+    list_items_selector = selectors.get('list_items', "tr a")
+    content_selector = selectors.get('content', "body")
+
     try:
         for board in boards:
             logging.info(f"[{config['game_name']} - {board['name']}] 접속 중: {board['url']}")
             driver.get(board['url'])
             time.sleep(random.uniform(3, 5))
 
-            # 키워드 우선순위: 보드별 키워드 -> 공통 키워드
             target_keywords = board.get('specific_keywords', config.get('specific_keywords', []))
             
-            # 1. 목록 수집 로직 (tr 요소가 나타날 때까지 대기)
+            # 1. 목록 수집 로직: 설정된 컨테이너가 나타날 때까지 대기
             try:
-                wait.until(EC.presence_of_all_elements_located((By.TAG_NAME, "tr")))
-                rows = driver.find_elements(By.TAG_NAME, "tr")
+                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, list_container_selector)))
+                # 설정된 항목 셀렉터(list_items)로 게시글 링크들을 한 번에 수집
+                elements = driver.find_elements(By.CSS_SELECTOR, list_items_selector)
             except Exception as e:
-                logging.error(f"목록 로딩 실패: {e}")
+                logging.error(f"목록 로딩 실패 (셀렉터: {list_container_selector}): {e}")
                 continue
 
             targets = []
-            for row in rows:
+            for el in elements:
                 try:
-                    # 공지사항 등 특정 클래스 제외 (기존 로직 유지)
-                    class_name = row.get_attribute("class") or ""
-                    if "post_board_fix__jw2yg" in class_name:
-                        continue
+                    title = el.text.strip()
+                    href = el.get_attribute("href")
 
-                    link = row.find_element(By.TAG_NAME, "a")
-                    title = link.text.strip()
-                    href = link.get_attribute("href")
-
+                    # 키워드 매칭 검사
                     if href and any(kw in title for kw in target_keywords):
-                        # 제목 내 줄바꿈 제거 (순수 제목만 추출)
                         clean_title = title.split('\n')[0]
                         targets.append({"title": clean_title, "url": href})
                 except:
                     continue
 
-            # 중복 URL 제거 및 개수 제한 (테스트용으로 상위 1개만 실행하도록 유지)
             unique_targets = {t['url']: t for t in targets}.values()
             
             for target in list(unique_targets)[:1]:
@@ -91,35 +93,74 @@ def process_game_scraping(driver, config, client, save_fn, exists_fn):
                 driver.get(url)
                 time.sleep(random.uniform(3, 5))
                 
-                # 본문 추출
-                try:
-                    content_el = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, config['selectors']['content'])))
-                    full_text = content_el.text
-                except:
-                    full_text = driver.find_element(By.TAG_NAME, "body").text
-
-                # 본문 필수 문구 필터링
-                must_include_list = board.get('must_include', [])
-                if must_include_list and not any(text in full_text for text in must_include_list):
-                    logging.info(f" ▷ '{board['name']}' 필수 문구 미포함으로 스킵합니다.")
-                    continue
+                board_type = board.get('type')
+                full_text = ""
+                image_parts = []
                 
+                # 2. 본문 및 이미지 추출 로직
+                try:
+                    # 설정된 content 셀렉터 중 일치하는 요소 대기
+                    content_el = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, content_selector)))
+                    
+                    if board_type == "image":
+                        # 본문 영역 내의 모든 이미지 수집
+                        imgs = content_el.find_elements(By.TAG_NAME, "img")
+                        img_urls = [img.get_attribute("src") for img in imgs if img.get_attribute("src") and "http" in img.get_attribute("src")]
+                        
+                        # 모든 이미지 다운로드 및 Part 변환 (최대 10개)
+                        for img_url in img_urls[:10]:
+                            try:
+                                img_data = requests.get(img_url, timeout=10).content
+                                image_parts.append(types.Part.from_bytes(data=img_data, mime_type="image/jpeg"))
+                            except: continue
+                        
+                        if not image_parts:
+                            logging.warning("이미지를 찾을 수 없어 텍스트 분석으로 전환합니다.")
+                            full_text = content_el.text
+                    else:
+                        full_text = content_el.text
+                        
+                        # 필수 문구 필터링
+                        must_include_list = board.get('must_include', [])
+                        if must_include_list and not any(text in full_text for text in must_include_list):
+                            logging.info(f" ▷ 필수 문구 미포함 스킵")
+                            continue
+                except Exception as e:
+                    logging.error(f"본문 추출 실패: {e}")
+                    continue
+
+
+                
+                name = board.get('name')
                 prompt_func = board.get('specific_prompt')
                 if prompt_func:
-                    final_prompt = prompt_func(title, full_text)
+                    final_prompt = prompt_func(name, title, full_text)
                 else:
                     # 기본 프롬프트가 없을 경우에 대한 예외 처리 로직 필요
                     logging.error("사용 가능한 프롬프트 템플릿이 없습니다.")
                     continue
 
-
                 try:
-                    # 2. AI 분석 진행 (Gemini 2.0 모델 사용 권장)
-                    response = client.models.generate_content(
-                        model='gemini-2.5-flash', 
-                        contents=final_prompt
-                    )
+                    contents_payload = [final_prompt]
+                    if board_type == "image":
+                        # 텍스트 명령어 뒤에 이미지 객체들을 추가
+                        contents_payload.extend(image_parts)
+                        
+                        response = client.models.generate_content(
+                            model='gemini-2.5-flash', # 이미지 분석 효율이 좋은 2.0 모델 권장
+                            contents=contents_payload,
+                            config=types.GenerateContentConfig(
+                                tools=[types.Tool(google_search=types.GoogleSearch())] 
+                            )
+                        )
+                    else:
+                        response = client.models.generate_content(
+                            model='gemini-2.5-flash-lite', 
+                            contents=final_prompt
+                        )
+
                     response_text = response.text
+                    print(response_text)  # AI 응답 원문 출력 (디버깅용)
 
                     # 3. JSON 파싱 및 정제
                     try:
